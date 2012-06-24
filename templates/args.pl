@@ -1,5 +1,7 @@
 #!/usr/bin/perl
-
+# This is a template for arguments parsing in perl
+# You will have to tweak this for your need
+use strict;
 use warnings;
 
 sub usage {
