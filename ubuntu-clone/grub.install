@@ -1,0 +1,48 @@
+#!/bin/bash
+
+
+
+errch ()
+{
+   if [[ $? != 0 ]]
+   then
+       echo "$1 - failed"
+	   exit 1
+   fi
+
+}
+
+
+if [[ $# -lt 1 ]]
+then
+	echo "expecting the disk device name as argument."
+	echo "Exiting"
+	exit
+fi
+
+disk=$1
+rootdir=$2
+
+
+echo "Installing grub bootloader ... "
+
+echo "Set the Boot Flag on the partition"
+parted $disk set 1 boot on
+parted $disk set 2 boot on
+sync
+
+
+#### If you need to use the installed grub from the harddisk (not the one in the flash drive), then use chroot
+echo "Creating the grub configuration file " 
+cfg=$rootdir/boot/grub/grub.cfg
+mv $cfg ${cfg}.bak
+errch "config-backup"
+
+echo "Installing the grub config file" 
+grub-mkconfig -o $cfg
+errch "grubconfig"
+
+grub-install $disk --root-directory=$rootdir
+errch "grubinstall"
+
+

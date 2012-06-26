@@ -1,0 +1,37 @@
+#/bin/bash
+
+usage ()
+{
+   echo "Usage: "
+   echo "    ./fstab-update <partition> <filesystem> <fstab file name>"
+   echo; echo; echo    
+}
+
+if [[ $# != 3 ]]
+then
+	echo "Insufficient paramaters"
+	usage
+	exit 1
+
+fi
+
+partition=$1
+fs=$2
+fstab=$3
+
+id=`blkid -o value -s UUID $partition`
+echo "uuid for $partition is $id"
+
+echo "backup the fstab"
+cp $fstab ${fstab}.bak
+echo "update the fstab"
+sed -i "s%^UUID=.* / .*$%UUID=$id /               $fs  errors=remount-ro 0       1 %" $fstab
+
+cat $fstab 
+
+echo "update fstab done"
+
+## The line in the fstab should look like this:
+### UUID=2992ef60-39a0-4947-ba7a-95aaf38b8a48 /               ext3    errors=remount-ro 0       1
+
+

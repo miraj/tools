@@ -1,0 +1,8 @@
+
+unused=$1
+unused=$2
+hostname=$3
+
+echo "$hostname" > /mnt/disk/etc/hostname
+
+

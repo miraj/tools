@@ -1,0 +1,46 @@
+
+ Clone scripts to install snapshot on a given partition
+ works for ubuntu. cannot guarantee other distributions.
+
+ To install, run the 
+
+   ./install snapshot partition
+
+	eg: ./install ubuntu-9.10.tgz  /dev/sda4 
+
+	Note: You may get latest snapshots from the ftp server
+		ftp server = 404580dt001
+		user name  = olive
+		password   = olive1
+
+		goto  Miraj/build-machine directory 
+
+TODO:
+. print the config file to the screen
+. Add logging. will be useful to double check, debug
+. add support to provide hostname
+. add support to create a user. Also set the password. Should be sudoer.
+. Add support for fresh machine installation
+. Add support to set the timezone
+
+
+How to take a snapshot
+----------------------
+
+boot to the linux in the flash drive
+mount the partition (which you want take a snapshot). Assume /mnt/disk
+cd /mnt/disk
+tar czvf ~/snapshot.tgz * 
+reboot
+
+-----------------
+
+SVN Repository:
+svn://devsource1.am.logitech.com/trunk/Embedded/Platform/PreOliveObsolete/trunk/tools/clone
+
+
+The Ubuntu snapshot is available at:
+-------------------------------------
+Olive FTP server Miraj/ubuntu-9.10.tgz
+
+

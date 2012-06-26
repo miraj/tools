@@ -1,0 +1,48 @@
+#!/bin/bash
+
+
+# This script checks if the environment is right
+# check if all commands needed are available
+
+fs=$1
+
+type mkfs.$fs
+if [[ $? != 0 ]]
+then
+	echo "mkfs.${fs} not found!!!"
+    echo "Environment check failed"
+    exit 1
+fi
+
+
+cmds='
+file
+sed
+awk
+grep
+mount
+umount
+tar
+sync
+parted
+grub-mkconfig
+grub-install
+blkid
+'
+
+for c in $cmds
+do
+   type $c
+   if [[ $? != 0 ]]
+   then
+		echo "$c not found!!!"
+        echo "Environment check failed"
+        exit 1
+   fi
+done
+
+
+exit 0
+
+
+

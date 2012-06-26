@@ -1,0 +1,135 @@
+#!/bin/bash
+
+
+usage ()
+{
+  echo; echo "Usage: "
+  echo "./install <snapshotfilename.tgz> <partitionname> <hostname>"
+  echo "   partition name : eg: /dev/sda5 or /dev/sda1 "
+  echo; echo; echo 
+}
+
+
+fs=ext3
+
+if [[ $# -lt 3 ]]
+then
+	echo "Insufficient parameters "
+	echo; echo
+	usage
+	exit 1
+fi
+
+if [[ $EUID != 0 ]]
+then
+    echo "This script must be run as root user "
+	echo "try sudo ./install <snapshot file name> <partition name>"
+	exit 1
+fi
+
+echo "Let's check if the environment is good"
+
+bash ./checkenv $fs
+if [[ $? != 0 ]]
+then
+    echo "Environment not sutable for running installation script"
+    echo "Exiting.........."
+	exit 1
+fi
+
+snapshot=$1
+partition=$2
+hostname=$3
+mpoint=/mnt/root
+mkdir -p $mpoint
+umount $mpoint
+
+
+#Basic validation of the snapshot file
+file $snapshot && file $snapshot | grep "gzip compressed"
+if [[ $? != 0 ]]
+then
+	echo "$snapshot doesn't seem to be a gzip compressed tar file"	
+	usage
+	echo "Exiting......."
+	exit 1
+fi
+
+#Check if the parameter passed look like a partition
+echo $partition | grep "/dev/.*[1-9]$"
+if [[ $? != 0 ]]
+then
+	echo "$partition doesn't seem to be a partition"	
+	usage
+	echo "Exiting......."
+	exit 1
+fi
+
+
+
+# Extract the disk name from the partition name
+# eg: if partition is /dev/sda2, the disk is /dev/sda
+disk=`echo $partition | sed "s%\(/dev/.*\)[1-9]$%\1%" `
+echo "The disk = $disk"
+file $disk && file $partition
+if [[ $? != 0 ]]
+then
+	echo "$partition not found "	
+	echo "Exiting......."
+	exit 1
+fi
+
+
+#Check if the partition is already used or mounted
+mount | grep "^$partition"
+if [[ $? -eq 0 ]]
+then
+	echo "$partition seems to be a used partition"	
+	echo "You may be installing the OS to a wrong partition"
+	echo "If you are sure, you specified the right partition name,"
+	echo "just UNMOUNT the partition and run the install script again"
+	echo
+	usage
+	echo "Exiting......."
+	exit 1
+fi
+
+#check if the filename is an absolute path or not
+echo $snapshot | grep "^/"
+if [[ $? != 0 ]]
+then
+    # Not absolute path
+    curdir=`pwd`
+	snapshot=${curdir}/${snapshot}
+    echo "Absolute path of the snapshot = $snapshot"
+fi
+
+
+bash ./clone $snapshot $partition $mpoint $fs
+if [[ $? != 0 ]] 
+then 
+   echo "OS Installation failed "
+   echo "Exiting...."
+   exit 1
+fi
+bash ./grub.install $disk $mpoint
+
+bash ./fstab.update $partition $fs ${mpoint}/etc/fstab
+
+
+bash ./postinstall $*
+
+echo "Unmounting filesystem.."
+umount $mpoint
+
+
+echo "==================================================="
+echo ""
+echo ""
+echo "  1. Power off the server (poweroff command)"
+echo "  2. Remove the USB disk"
+echo "  3. Power on the server"
+echo "     You should get the linux login monitor and console"
+echo "       ENJOY! "
+echo "==================================================="
+

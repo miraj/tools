@@ -1,0 +1,70 @@
+#!/bin/bash
+
+
+usage ()
+{
+  echo; echo "Usage: "
+  echo "./clone <snapshotfilename.tgz> <partitionname> <mount point> <fs>"
+  echo "   partition name : eg: /dev/sda5 or /dev/sda1 "
+}
+
+errch ()
+{
+   if [[ $? != 0 ]]
+   then
+       echo "$1 - failed"
+	   exit 1
+   fi
+
+}
+
+if [[ $# -lt 2 ]]
+then
+	usage
+	exit
+fi
+
+snapshot=$1
+partition=$2
+mpoint=$3
+fs=$4
+label=tivo
+
+
+echo; echo; echo; 
+echo "Installing OS on partition - $partition"
+echo "Installing bootloader (GRUB) on the disk - $partition"
+echo; echo; echo; 
+
+echo "Press Enter to continue ....."
+echo "Press ctrl-C to abort ....."
+read
+ 
+
+## Let's Start our work here
+
+echo "Format second partition to $fs and label it as $label"
+echo " This will take few minutes ..... "
+mkfs.${fs} -L $label $partition
+errch "formatting"
+sync
+
+echo "mount the partition"
+mount $partition $mpoint
+errch "mounting"
+
+echo "Untarring the root filesystem"
+echo "This will take couple of minutes. Please wait..............."
+sleep 5
+cd  $mpoint
+tar xzmvf $snapshot
+errch "untarring"
+
+#let all the files get flushed to hard disk
+sync
+
+echo "OS Installation is done !!!"
+sleep 4
+
+exit 0
+
