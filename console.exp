@@ -1,0 +1,128 @@
+#!/usr/bin/expect
+
+
+##############################################################################
+#                       Description:
+##############################################################################
+# A terminal emulater script using TCL/expect. Connects to the serial port and gives control to user.
+# Consider this as a replacement for hyperterminal and minicom. 
+# Features   : Auto logging, capable of automation (by adding keywords to the interact command)
+# Parameters : 1. baudrate.  2. port
+# Usage      :
+#     ./olive.exp 19200 /dev/ttyS1 
+#     ./olive.exp 38400                # connects to /dev/ttyS0
+#     ./olive.exp                      # connects with 9600 baudrate to /dev/ttyS0
+
+
+#uncomment this - if you need to debug
+#exp_internal 1
+
+proc usage {} {
+	puts "
+            Usage:
+
+            ./olive.exp -b <baudrate> -p <serial device> -l <logfilename>
+
+"
+}
+
+source procedures.inc.exp
+
+set baud 115200
+set port /dev/ttyUSB0
+set ff [clock format [clock seconds] -format "%d%h%Y"]
+set logfile logs/$ff.log
+
+for {set i 0} {$i < [llength $argv]} {incr i} {
+	set arg [lindex $argv $i]
+	if {[string first "-" $arg] == 0} {
+	switch -- $arg {
+		"-l" {set logfile [lindex $argv [expr $i + 1]] }
+		"-p" {set port [lindex $argv [expr $i + 1]] }
+		"-b" {set baud [lindex $argv [expr $i + 1]] }
+		"-h" {usage ; exit 0}
+		default {puts "\nUnknown option : $arg"; usage ; exit 2}
+		}
+	}
+}
+
+
+conf_serial $baud n 8 1
+# Here is where we connect to the serial console
+set com [connect serial $port]
+## clear the console - any possible junk charators on the command line 
+#for {set i 0} {$i < 30} {incr i} {
+#   send \010
+#   sleep .5
+#}
+
+
+exec mkdir -p logs
+log_file -a $logfile
+send_user "\n\n\n[clock format [clock seconds ]]\n\n\n"
+
+
+set timeout -1
+set tftpsrvr 172.17.81.129
+# Let's give control to the user
+puts "interacting"
+puts "type __bye to exit"
+set bpr "> "
+
+
+#Kernel command line: rw console=uart,mmio,0x10400b00,115200n8 boardID=0x106001 HpkImpl=Gen07 nfsroot=192.168.1.250:/Gen07/nfsroot xnfsinit=192.168.1.250:/Gen07/nfsroot init=/devbin/nfsinit sysgen=true rw init=/devbin/nfsinit nfsroot=192.168.1.250:/Gen07/nfsroot
+set nfshost "192.168.1.250"
+set tftphost "192.168.90.227"
+set nfsdir /Gen07/nfsroot
+
+interact {
+	"__bye" {return}
+	"__gggggg" {
+			   for {set i 0} {$i < 10} {incr i} {
+				send "help \n"
+			    expect $bpr
+			   }
+			}
+	"__if" {
+				send "help ifconfig \n"
+			    expect $bpr
+     			send "ifconfig -ipaddr=\"192.168.90.223\" -mask=\"255.255.255.0\" -gw=\"192.168.90.1\" -dns=\"4.2.2.2\" \n"
+			    expect $bpr
+			}
+
+	"__boot" {
+			send "boot -3 root=/dev/sda4' \n"
+	}
+
+
+	"__setboot" {
+			send "setenv STARTUP \"boot -3 root=/dev/sda4\" \n"
+			expect $bpr
+			send "printenv \n"
+	}
+
+	"__nfs" {
+			send "boot -tftp=$tftphost:vmlinux.px 'rw console=uart,mmio,0x10400b00,115200n8 boardID=0x106001 HpkImpl=Gen07 nfsroot=$nfshost:$nfsdir xnfsinit=$nfshost:$nfsdir init=/devbin/nfsinit sysgen=true rw init=/devbin/nfsinit nfsroot=$nfshost:$nfsdir' \n"
+	}
+
+	"__test1" {
+			send "boot -tftp=$tftphost:vmlinux.px 'rw HpkImpl=Gen07 nfsroot=$nfshost:$nfsdir xnfsinit=$nfshost:$nfsdir init=/devbin/nfs sysgen=true rw init=/devbin/nfs nfsroot=$nfshost:$nfsdir' "
+	}
+
+	"__test2" {
+			send "boot -tftp=$tftphost:vmlinux.px 'nfs1' "
+	}
+
+
+	"__test3" {
+			send "boot -tftp=$tftphost:vmlinux.px 'rw console=/dev/ttyS0,mmio,0x10400b00,115200n8 boardID=0x106001 HpkImpl=Gen07 root=/dev/nfs nfsroot=$nfshost:$nfsdir xnfsinit=$nfshost:$nfsdir init=/sbin/init sysgen=true rw init=/sbin/init nfsroot=$nfshost:$nfsdir' \n"
+	}
+
+
+	"__exit" {return}
+
+}
+discon $com
+
+
+

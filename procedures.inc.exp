@@ -1,0 +1,633 @@
+
+proc dolock {lock} {
+
+    if { [ catch { open $lock {WRONLY CREAT} } fd ] } {
+        return -1
+    }
+    puts $fd "     [pid] ci [lindex [split [exec who am i]] 0]"
+    close $fd
+    return 0
+}
+
+proc ttylock {device} {
+    set ll [split $device "/"]
+    set len [llength $ll]
+    set name [lindex $ll [expr $len - 1] ]
+    set lock "/var/lock/LCK..$name"
+
+    ## Check if the serial port is already locked 
+    if { [ catch { open $lock {RDONLY} } fd ] } {
+        if {[dolock $lock] != 0} {
+            puts "Device $device is locked."
+            return -1
+        } else {
+            return 0
+        }
+     } else {
+        ## Lock exists
+        ## Check if stale 
+        set file [read $fd]
+        close $fd
+        set ll [split [string trim $file] ]
+        set id [lindex $ll 0]
+        set name [lindex $ll 1]
+        set user [lindex $ll 2]
+        if {[catch {exec test -d /proc/$id} res]} {
+            ## process doesn't exist 
+            ## lock is stale
+            puts "Lockfile is stale. Overriding it.."
+            exec rm -rf $lock
+
+            if {[dolock $lock] != 0} {
+                puts "Device $device is locked."
+                return -1
+            } else {
+                return 0
+            }
+        } else {
+            ## Lock is valid
+            puts "Device $device is locked."
+            return -1
+        }
+    }
+
+}
+
+
+proc ttyunlock {device} {
+    set ll [split $device "/"]
+    set len [llength $ll]
+    set name [lindex $ll [expr $len - 1] ]
+    set lock "/var/lock/LCK..$name"
+
+    if { [ catch { open $lock {RDONLY} } fd ] } {
+        return -1
+     } else {
+        set file [read $fd]
+        close $fd
+        set ll [split [string trim $file] ]
+        set id [lindex $ll 0]
+        set name [lindex $ll 1]
+        set user [lindex $ll 2]
+        if {$id == [pid] && $name == "ci"} {
+            exec rm -rf $lock
+        } else {
+        }
+    }
+
+    return 0
+}
+
+
+
+proc settimeout {seconds} {
+    global timeout
+    set timeout $seconds
+    expect_after {
+        timeout {puts " Timeout!"; puts "Exiting..."; exit 1}
+    }
+}
+
+# Variables to store spawn ids 
+set console console
+set shell   shell
+
+proc cmdreturn {buffer line} {
+	#puts $buffer
+	set out $buffer
+	set outlist [split $out "\r"]
+	#puts $outlist
+	set st [string trim [lindex $outlist $line]]
+	return $st
+	
+}
+
+proc cmdstatus_shell {} {
+	set out [execute_shell "echo $? \n"]
+	return [cmdreturn $out 1]
+ }
+
+
+proc cmdstatus_console {} {
+	set out [execute_console "echo $? \n"]
+	return [cmdreturn $out 1]
+ }
+
+proc gettargetip_internal {intf} {
+
+	set out [execute "ifconfig $intf  | grep \"inet addr\" | awk -F: '{print \$2}' | awk '{print \$1}'\n"]
+	return [cmdreturn $out 3]
+
+}
+
+
+
+proc validate_ip {ip} {
+
+	set ll [split $ip "."]
+	set len [llength $ll]
+	if {$len != 4} {
+		return "bad"
+	}
+
+	foreach elem $ll {
+		set elem [string trim $elem]
+		if {$elem == "" || ![string is digit $elem]} {
+			return "bad"
+		}
+	}
+
+	return "good"
+}
+
+proc gettargetip {intf} {
+
+	set retries 10
+	for {set i 0} {$i < $retries} {incr i} {
+
+		set ip [gettargetip_internal $intf]
+		if { [validate_ip $ip] == "good"} {
+			return $ip;
+		}
+	}
+
+	return "invalid"
+
+}
+
+
+set devices(0) nothing
+
+proc connect {connectOption device } {
+	global serial
+	global spawn_id
+    global devices 
+    if {[ttylock $device] != 0} {
+        exit 1
+    }
+	if { [ catch { open $device {RDWR NONBLOCK} } fid ] } {
+        ttyunlock $device
+		puts "Could not open $device port\n$fid"
+		return -1
+	}
+	if {[info exists $serial(baudrate)] == -1 || [info exists $serial(paritybits)] == -1 || [info exists $serial(databits)] == -1 || [info exists $serial(stopbits)] == -1 } {
+        ttyunlock $device
+		puts "serail port configuration is not done yet"
+		puts "Use conf_serial() procedure for serial port configuration"
+		pust "Aborting ..."
+		exit -1
+
+	}
+	fconfigure $fid -mode $serial(baudrate),$serial(paritybits),$serial(databits),$serial(stopbits) -buffering none -blocking 1 -buffersize 5000 -eofchar {{\x1a} {}} -translation {auto crlf}
+	spawn -open $fid
+    set devices($spawn_id) $device
+	return $spawn_id
+}
+
+proc discon {fd} {
+    global devices 
+    if {[info exist devices($fd)] == 1} {
+        ttyunlock $devices($fd)
+    }
+	close $fd
+}
+proc conf_serial {baud parity databits stopbits } {
+	global serial
+	set serial(baudrate) 		$baud
+	set serial(paritybits)		$parity
+	set serial(databits)		$databits
+	set serial(stopbits)		$stopbits 	
+}
+
+### This function clear the serial console by sending backspace charactor
+proc clearline {count} {
+	global console
+	set spawn_id $console
+    for {set i 0} {$i < $count} {incr i} {
+        send \010
+    }
+
+}
+
+proc serial_console_init {} {
+	global baud port console
+	conf_serial $baud n 8 1
+	set console [connect serial $port]
+    clearline 30
+}
+
+proc serial_console_close {} {
+	global console
+	discon $console
+}
+
+proc shell_init {} {
+	global shell_program spawn_id defpr pr shell console
+	spawn $shell_program
+	expect $defpr
+    ## Importan Note: Never remove the \r from the string below. It is needed for cases where the default prompt is longer than 80 charactors
+	send "export PS1=\"$pr\"\r\n"
+	# Wait for the echo of the export command and then the first prompt (because of \r)
+	expect $pr; expect $pr
+	# Wait for the actual prompt (because of \n)
+	expect $pr
+	set shell $spawn_id
+}
+
+proc shell_close {} {
+	global spawn_id pr shell 
+	set spawn_id $shell
+	send "exit\n"
+	expect eof
+}
+
+
+## This function syncronizes to the console state of Olive
+## Basically just listens to the console prints and takes the script safely to the shell prompt
+proc synch_to_olive {} {
+
+	global lpr rpr deflpr console spawn_id timeout 
+
+	set tbak $timeout
+	set timeout [expr 5 * 60]
+
+	set synch no
+
+	set spawn_id $console
+
+	expect {
+		"RedBoot(tm) bootstrap and debug environment"    {set synch started; exp_continue}
+		"== Executing boot script in"                    {set synch started; exp_continue}
+		"seconds - enter ^C to abort"                    {set synch started; exp_continue}
+		"ubi attach"                                     {set synch started; exp_continue}
+		"scanning"                                       {set synch started; exp_continue}
+		"ubi load"                                       {set synch started; exp_continue}
+		"exec"                                           {set synch started; exp_continue}
+		"Uncompressing Linux"                            {set synch started; exp_continue}
+		"UBI: attaching"                                 {set synch started; exp_continue}
+		"MXC WatchDog Driver"                            {set synch started; exp_continue}
+		"Check upgrade status"                           {set synch started; exp_continue}
+		"init started: BusyBox"                          {set synch started; exp_continue}
+		"Preparing startup environment"                  {set synch started; exp_continue}
+		"Starting IPC daemon"                            {set synch started; exp_continue}
+		"Updating MAC address"                           {set synch started; exp_continue}
+		"BMI Done"                                       {set synch started; exp_continue}
+		"Starting Harmony Olive Services Manager"        {set synch started; exp_continue}
+		"Starting USB HID"                               {set synch started; exp_continue}
+		"Please press Enter to activate this console."   {set synch complete; sleep 3}
+		timeout 										 {send_user "synch_to_olive Timedout\n"}
+	}
+
+	set timeout $tbak
+	send_user "synch status = $synch"
+    return $synch
+}
+
+proc setprompt {} {
+
+	global lpr rpr deflpr console spawn_id
+	set spawn_id $console
+	send "export PS1=\"$lpr\"\n" 
+	## wait for echo from the command
+	expect $lpr
+	## wait for actual prompt
+	expect {
+		 "starting pid" {exp_continue}
+		 "job control turned off" {
+								    expect $deflpr
+									send "export PS1=\"$lpr\"\n"
+									exp_continue
+								  }
+        $rpr {}
+        $lpr {}
+        "> " {                      send \004
+                                    expect $deflpr
+                                    send "export PS1=\"$lpr\"\n"
+                                    expect $lpr
+                                    exp_continue
+
+			}
+	}
+
+    return 0
+}
+
+proc reboot {} {
+	global rpr deflpr lpr console spawn_id
+	set spawn_id $console
+	# Find the context. Where are we right now? 
+	# Are we in linux or redboot?
+
+	send "export PS1=\"$lpr\"\n"
+	## Eat up the echo of the command itself
+	expect $lpr
+	expect {
+		 $rpr {send "reset"; sleep 1; send "\n"}
+		 $lpr {send "reboot"; sleep 1; send "\n"}
+	}
+
+	## Here - target is rebooting 
+
+	expect {
+	"Please press Enter to activate this console"  {}
+	}
+	log "Do not Press Enter please! CI Scripts are in control! "
+	sleep 10
+	send "\n"
+	expect $deflpr
+	setprompt
+
+}
+
+proc goto_redboot {} {
+	global rpr lpr console spawn_id
+	set spawn_id $console
+
+	send "export PS1=\"$lpr\"\n"
+	## Eat up the echo of the command itself
+	expect $lpr
+	expect {
+		 $rpr {return 0}
+		$lpr {send "reboot\n"}
+	}
+
+	expect {
+		" seconds - enter ^C to abort" {send \003}
+	}
+
+	expect {
+		 $rpr {return}
+	}
+
+}
+
+#proc setip_static {} {
+#	global rpr tip gw console spawn_id
+#	set spawn_id $console
+#
+#	send "ip_address -l $tip/24 -h $gw\n"
+#	expect $rpr
+#	send "ip_address\n"
+#	expect $rpr
+#}
+#
+
+
+proc setip_bootp {} {
+	global rpr console spawn_id
+	set spawn_id $console
+
+	send "ip_address -b\n"
+	expect $rpr
+	send "ip_address\n"
+	expect $rpr
+}
+
+
+proc flash_image {image tftpsrvr} {
+	global rpr console spawn_id
+	set spawn_id $console
+
+
+	send "ubi attach -f 0x80000 -l 0x07EC0000 -w 0x800 -e 0x20000 -s 0x200\n"
+	expect $rpr
+	send "load -v -r -b 0x100000 -h  $tftpsrvr $image\n"
+	expect {
+		"Can't load"           {expect $rpr; return "error"}
+		"operation timed out"  {expect $rpr; return "error"}
+		"Raw file loaded"      {expect $rpr}
+		$rpr				   {return "error"}
+	}
+
+	send "ubi format\n"
+	expect $rpr
+	return "ok"
+
+}
+
+
+
+
+
+proc upgrade {image tftpsrvr} {
+
+	log "try to get the redboot prompt" 
+	goto_redboot
+	sleep 2
+	setip_bootp
+	sleep 2
+	if {"ok" != [flash_image $image $tftpsrvr] } {
+		log "flash_image failed"
+		log "Aborting upgrade "
+		return "error"
+	}
+	sleep 2
+
+	return "ok"
+}
+
+
+
+
+# For logging. Date is used for filename.
+# The logfiles go into a directory called 'logs'
+
+proc startlog {testid} {
+	global workdir logs
+	exec mkdir -p $workdir/$logs
+	set underscore _
+	log_file -a $workdir/$logs/$testid.log
+	log "\n\n\n[clock format [clock seconds ]]\n\n\n"
+}
+
+
+proc log {str} {
+
+	send_user "\n$str\n"
+}
+
+
+proc deploy {src dst} {
+
+	global shell pr spawn_id tip tuser tpass workdir deploy
+	set spawn_id $shell
+	# src can be a single file or a list of files 
+	# backup the deployed files in local work dir
+	send "cp $src $workdir/$deploy\n"
+	expect $pr
+	## Deploy to the target
+    set try 0
+    while {1} {
+    	send "scp $src $tuser@$tip:$dst \n"
+       	expect {
+       		"Are you sure you want to continue connecting (yes/no)?"  {sleep 3; send "yes\n"; exp_continue}
+    	    "Permission denied"                                      {log "possibily wrong username or password. \n Exiting....."; exit 2}
+       	    "No route to host"                                       {log "wrong IP or target not ready or target not in network. \n Exiting....."; exit 2}
+    		"lost connection"                                        {log "Something wrong. \n Exiting....."; exit 2}
+	        "No such file or directory"                              {log "file not found. \n Exiting....."; exit 2}
+    	    "password: "                                             {send "$tpass\n"; exp_continue}
+   		    $pr                                                      {
+
+		    		    											    if {[cmdstatus_shell] != 0} {
+                                                                            incr try
+		    		    											        if {$try > 1} {
+		    	    													        log "scp returned error \n Exiting....."
+		     		    												        exit 3
+                                                                            }
+	    			    										        } else {
+                                                                            ## Success !!! 
+                                                                            break
+                                                                        }
+        	                                                          }
+    	}
+    }
+}
+
+proc conv {str} {
+	set ll [split $str]
+	set res ""
+	foreach word $ll {
+		set res "$res \\\n$word"
+	}
+
+	return $res
+}
+
+
+proc retrieveto {src dst} {
+
+	global shell pr spawn_id tip tuser tpass workdir retrieve
+	set spawn_id $shell
+	# src can be a single file or a list of files 
+    set try 0
+    while {1} {
+	    send "[conv "scp -r $tuser@$tip:$src $dst"] \n"
+    	expect {
+	    	"Are you sure you want to continue connecting (yes/no)?"  {sleep 3; send "yes\n"; exp_continue}
+		    "Permission denied"                                      {log "possibily wrong username or password. \n Exiting....."; exit 2}
+    		"No route to host"                                       {log "wrong IP or target not ready or target not in network. \n Exiting....."; exit 2}
+	    	"lost connection"                                        {log "Something wrong. \n Exiting....."; exit 2}
+		    "No such file or directory"                              {log "file not found. \n Exiting....."; exit 2}
+    		"password: "                                             {send "$tpass\n"; exp_continue}
+	    	$pr                                                      {
+
+		    		    											    if {[cmdstatus_shell] != 0} {
+                                                                            incr try
+		    		    											        if {$try > 1} {
+		    	    													        log "scp returned error \n Exiting....."
+		     		    												        exit 3
+                                                                            }
+	    			    										        } else {
+                                                                            ## Success !!! 
+                                                                            break
+                                                                        }
+						    										}
+    	}
+    }
+}
+
+
+proc retrieve {src} {
+	global workdir retrieve
+	retrieveto $src $workdir/$retrieve
+}
+
+
+
+proc execute_cmd {cmd where} {
+
+		global pr lpr rpr console spawn_id rpr shell spawn_id
+	if {$where == "console"} {
+
+		set spawn_id $console
+		set prompt $lpr
+
+	} elseif {$where == "shell"} {
+
+		set spawn_id $shell
+		set prompt $pr
+
+	} else {
+		puts "where = $where"
+		puts "invalid input "
+		puts "exiting......"
+		exit 3
+	}
+
+	set len [string len $cmd]
+	set nlpos [string first "\n" $cmd]
+	if {$nlpos == -1} {
+
+		# There is no newline character in the string - let's add it 
+		send "$cmd\n"
+	} else {
+		# make sure if the newline character is at the end of the command
+		if {$nlpos == [expr $len -1]} {
+			send "$cmd"
+		} else {
+			puts "Newline is not at the end of the command string"
+			puts "Here is the command \n\n"
+			puts "----------------------------"
+			puts $cmd
+			puts "\n"
+			puts "----------------------------"
+
+			puts "Exiting...."
+			exit 1
+
+		}
+	}
+
+	expect {
+		$prompt {}
+		$rpr {log "redboot is wrong place!"; exit 2}
+	}
+
+	return $expect_out(buffer)
+	
+
+}
+
+
+proc execute {cmd} {
+	return [execute_cmd "$cmd" console ]
+}
+
+proc execute_console {cmd} {
+	return [execute "$cmd"]
+}
+
+proc execute_shell {cmd} {
+	return [execute_cmd "$cmd" shell ]
+}
+
+
+
+proc disable_wired_intf {} {
+	global wired_intf
+	set conffile /etc/mac_ethernet
+	execute "[[ -f $conffile ]] && sed -i '1s/^/#/' $conffile"
+	execute "ifdown $wired_intf"
+}
+
+
+proc bringup_wired_intf {} {
+	global wired_intf wired_mac
+	set conffile /etc/mac_ethernet
+
+	if {$wired_mac == "default"} {
+		execute "ifconfig eth0  | grep HWaddr  | awk '{print \$5}' > $conffile"
+
+	} else {
+		execute "echo $wired_mac > $conffile"
+	}
+
+	execute "ifconfig $wired_intf down"
+	execute "ifconfig $wired_intf hw ether `cat $conffile`"
+	execute "ifconfig $wired_intf up"
+}
+
+
+
+
+
