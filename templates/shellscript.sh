@@ -2,10 +2,10 @@
 
 usage ()
 {
-	echo
-	echo "Usage:"
+    echo
+    echo "Usage:"
     echo "   $0  <options>"
-	echo
+    echo
 
 }
 
@@ -16,22 +16,22 @@ debug=no
 while [[ $# -ne 0 ]] 
 do
 
-	case $1 in
-		-f)
-			file=$2
-			shift
-			;;
-		-v)
-			verbose=yes
-			;;
-		-d)
-			debug=yes
-			;;
-		 *)
+    case $1 in
+        -f)
+            file=$2
+            shift
+            ;;
+        -v)
+            verbose=yes
+            ;;
+        -d)
+            debug=yes
+            ;;
+         *)
             echo Unknown option:  $arg
-			;;
-	esac
-	shift
+            ;;
+    esac
+    shift
 done
 
 
