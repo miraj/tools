@@ -1,4 +1,9 @@
 
+# Usage:
+#   source prog.sh
+#   prog 50
+#   prog 50 move
+
 prog ()
 {
     count=$1
