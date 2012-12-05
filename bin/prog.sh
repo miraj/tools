@@ -8,6 +8,8 @@ prog ()
 {
     count=$1
     move=$2
+
+	tput civis
     for f in `seq 1 $count`
     do
         for c in '\' '|' '/' '-'
@@ -23,7 +25,7 @@ prog ()
         done
 
     done
-
+	tput cnorm
 }
 
 
