@@ -3,7 +3,6 @@ source db.conf
 table=
 
 
-dir=`echo $0 | sed 's%/[^/]*$%%'`
 month=`date | awk '{print $2}'`
 year=`date | awk '{print $NF}'`
 file=`date | sed 's/ /_/g' | sed 's/:/_/g'  | sed 's/....//'`
